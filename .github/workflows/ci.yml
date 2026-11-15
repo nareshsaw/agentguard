@@ -1,0 +1,78 @@
+name: agentguard-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  OPA_VERSION: 1.22.4
+
+jobs:
+  policy:
+    name: Policy tests (OPA/Rego)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install OPA
+        run: |
+          curl -sSL -o opa "https://github.com/open-policy-agent/opa/releases/download/v${OPA_VERSION}/opa_linux_amd64_static"
+          chmod +x opa && sudo mv opa /usr/local/bin/
+      - run: opa fmt --fail --list policy/
+      - run: opa check --strict policy/
+      - run: opa test policy/ -v
+
+  unit:
+    name: Unit + MCP protocol tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install OPA
+        run: |
+          curl -sSL -o opa "https://github.com/open-policy-agent/opa/releases/download/v${OPA_VERSION}/opa_linux_amd64_static"
+          chmod +x opa && sudo mv opa /usr/local/bin/
+      - run: pip install -e ".[dev]"
+      - run: pytest -v
+
+  e2e:
+    name: Live incident on Kubernetes (kind)
+    needs: [policy, unit]
+    runs-on: ubuntu-latest
+    env:
+      AGENTGUARD_STATE_DIR: ${{ github.workspace }}/.agentguard
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install OPA
+        run: |
+          curl -sSL -o opa "https://github.com/open-policy-agent/opa/releases/download/v${OPA_VERSION}/opa_linux_amd64_static"
+          chmod +x opa && sudo mv opa /usr/local/bin/
+      - run: pip install -e .
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: agentguard
+      - name: Deploy demo app to staging and prod
+        run: |
+          kubectl apply -f e2e/demo-app.yaml
+          kubectl rollout status deploy/web -n staging --timeout=180s
+          kubectl rollout status deploy/web -n prod --timeout=180s
+      - name: Break staging with a bad release
+        run: kubectl set image deploy/web web=hashicorp/http-echo:9.9.9-does-not-exist -n staging
+      - name: Agent diagnoses, fixes and hits the guardrails
+        run: python e2e/agent_scenario.py
+      - name: Audit trail
+        if: always()
+        run: agentguard audit -n 50
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: agentguard-audit-log
+          path: .agentguard/audit.jsonl

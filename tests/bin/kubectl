@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Fake kubectl for tests. State lives in $FAKE_KUBE_STATE (JSON). Records every call in $FAKE_KUBE_LOG."""
+import json, os, sys
+
+state_path = os.environ["FAKE_KUBE_STATE"]
+state = json.load(open(state_path))
+args = sys.argv[1:]
+with open(os.environ.get("FAKE_KUBE_LOG", os.devnull), "a") as log:
+    log.write(json.dumps(args) + "\n")
+
+
+def opt(name, default=None):
+    for a in args:
+        if a.startswith(f"--{name}="):
+            return a.split("=", 1)[1]
+    if f"-{name}" in args:
+        return args[args.index(f"-{name}") + 1]
+    return default
+
+
+ns = opt("n", "default")
+dry = "--dry-run=server" in args
+deps = state.setdefault(ns, {})
+
+
+def fail(msg):
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
+
+def dep_json(name, d):
+    return {"metadata": {"name": name, "annotations": {"deployment.kubernetes.io/revision": str(d["revision"])}},
+            "spec": {"replicas": d["replicas"], "template": {"spec": {"containers": [{"name": "app", "image": d["image"]}]}}},
+            "status": {"readyReplicas": 0 if d.get("broken") else d["replicas"], "updatedReplicas": d["replicas"],
+                       "conditions": []}}
+
+
+def pod_json(dname, d, i):
+    waiting = {"reason": "ImagePullBackOff", "message": f"Back-off pulling image {d['image']}"} if d.get("broken") else None
+    return {"metadata": {"name": f"{dname}-{i}", "ownerReferences": [{"name": dname}]},
+            "spec": {"containers": [{"name": "app"}], "nodeName": "kind-control-plane"},
+            "status": {"phase": "Pending" if waiting else "Running", "conditions": [],
+                       "containerStatuses": [{"name": "app", "ready": not waiting, "restartCount": 0, "image": d["image"],
+                                              "state": {"waiting": waiting} if waiting else {"running": {}}}]}}
+
+
+verb = args[0]
+if verb == "get":
+    kind = args[1]
+    if kind in ("deployment", "deployments") and len(args) > 2 and not args[2].startswith("-"):
+        name = args[2]
+        if name not in deps:
+            fail(f'Error from server (NotFound): deployments.apps "{name}" not found')
+        print(json.dumps(dep_json(name, deps[name])))
+    elif kind == "deployments":
+        print(json.dumps({"items": [dep_json(n, d) for n, d in deps.items()]}))
+    elif kind == "pods":
+        print(json.dumps({"items": [pod_json(n, d, i) for n, d in deps.items() for i in range(d["replicas"])]}))
+    elif kind == "events":
+        ev = [{"type": "Warning", "reason": "Failed", "message": f"Failed to pull image {d['image']}", "count": 3,
+               "lastTimestamp": "2026-11-16T00:00:00Z", "involvedObject": {"kind": "Pod", "name": f"{n}-0"}}
+              for n, d in deps.items() if d.get("broken")]
+        print(json.dumps({"items": ev}))
+    sys.exit(0)
+
+if verb == "logs":
+    print("log line 1\nlog line 2")
+    sys.exit(0)
+
+if verb == "scale":
+    name = args[1].split("/")[1]
+    if name not in deps:
+        fail(f'Error from server (NotFound): deployments.apps "{name}" not found')
+    if not dry:
+        deps[name]["replicas"] = int(opt("replicas"))
+    print(f"deployment.apps/{name} scaled" + (" (server dry run)" if dry else ""))
+elif verb == "rollout":
+    sub, name = args[1], args[2].split("/")[1]
+    if name not in deps:
+        fail(f'Error from server (NotFound): deployments.apps "{name}" not found')
+    d = deps[name]
+    if not dry:
+        if sub == "undo":
+            d["image"], d["broken"] = d.get("previous_image", d["image"]), False
+        d["revision"] += 1
+    print(f"deployment.apps/{name} {'rolled back' if sub == 'undo' else 'restarted'}" + (" (server dry run)" if dry else ""))
+elif verb == "delete":
+    print(f'pod "{args[2]}" deleted' + (" (server dry run)" if dry else ""))
+else:
+    fail(f"fake kubectl: unsupported {args}")
+
+json.dump(state, open(state_path, "w"))

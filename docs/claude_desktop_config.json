@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "agentguard": {
+      "command": "/ABSOLUTE/PATH/TO/agentguard/.venv/bin/agentguard",
+      "args": ["serve"],
+      "env": {
+        "KUBECONFIG": "/Users/YOU/.kube/config",
+        "AGENTGUARD_KUBE_CONTEXT": "kind-agentguard",
+        "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+      }
+    }
+  }
+}

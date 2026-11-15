@@ -1,0 +1,46 @@
+# Demo workload: the same "web" service in staging and prod.
+apiVersion: v1
+kind: Namespace
+metadata: { name: staging }
+---
+apiVersion: v1
+kind: Namespace
+metadata: { name: prod }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: web, namespace: staging }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: web } }
+  template:
+    metadata: { labels: { app: web } }
+    spec:
+      containers:
+        - name: web
+          image: hashicorp/http-echo:1.0
+          args: ["-text=hello from staging", "-listen=:5678"]
+          ports: [{ containerPort: 5678 }]
+          readinessProbe: { httpGet: { path: /, port: 5678 } }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 32Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: web, namespace: prod }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: web } }
+  template:
+    metadata: { labels: { app: web } }
+    spec:
+      containers:
+        - name: web
+          image: hashicorp/http-echo:1.0
+          args: ["-text=hello from prod", "-listen=:5678"]
+          ports: [{ containerPort: 5678 }]
+          readinessProbe: { httpGet: { path: /, port: 5678 } }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 32Mi }

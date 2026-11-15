@@ -1,0 +1,19 @@
+{
+  "protected_namespaces": [
+    "kube-system",
+    "kube-public",
+    "kube-node-lease",
+    "local-path-storage",
+    "agentguard"
+  ],
+  "approval_namespaces": [
+    "prod"
+  ],
+  "max_replicas": 10,
+  "max_scale_factor": 2,
+  "rate_limit": {
+    "max_mutations": 5,
+    "window_seconds": 600
+  },
+  "change_freeze": false
+}
