@@ -84,6 +84,13 @@ elif verb == "rollout":
             d["image"], d["broken"] = d.get("previous_image", d["image"]), False
         d["revision"] += 1
     print(f"deployment.apps/{name} {'rolled back' if sub == 'undo' else 'restarted'}" + (" (server dry run)" if dry else ""))
+elif verb == "patch":
+    name = args[1].split("/")[1]
+    if name not in deps:
+        fail(f'Error from server (NotFound): deployments.apps "{name}" not found')
+    if not dry:
+        deps[name]["revision"] += 1
+    print(f"deployment.apps/{name} patched" + (" (server dry run)" if dry else ""))
 elif verb == "delete":
     print(f'pod "{args[2]}" deleted' + (" (server dry run)" if dry else ""))
 else:

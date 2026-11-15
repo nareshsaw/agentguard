@@ -123,3 +123,10 @@ def test_audit_window(tmp_path):
     log.record(tool="x", action="mutate", outcome="executed")
     log.record(tool="x", action="mutate", outcome="denied")
     assert log.recent_mutations(600) == 1
+
+
+def test_restart_uses_a_dry_run_capable_patch(guard, env):
+    assert guard.call("restart_deployment", "staging", {"name": "web"})["outcome"] == "executed"
+    patches = [c for c in kubectl_calls(env) if c[0] == "patch"]
+    assert len(patches) == 2 and "--dry-run=server" in patches[0] and "--dry-run=server" not in patches[1]
+    assert "kubectl.kubernetes.io/restartedAt" in patches[1][patches[1].index("-p") + 1]

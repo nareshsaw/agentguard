@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from datetime import datetime, timezone
 from typing import Callable
 
 Runner = Callable[[list[str]], str]
@@ -88,7 +89,12 @@ class Kube:
 
     # ---------------------------------------------------------------- changes
     def restart(self, namespace: str, name: str, dry_run: bool = False) -> str:
-        return self.run(["rollout", "restart", f"deployment/{name}", "-n", namespace, *_dry(dry_run)]).strip()
+        # Same patch `kubectl rollout restart` sends, but `rollout restart` has no --dry-run flag.
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        patch = {"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": stamp}}}}}
+        return self.run(
+            ["patch", f"deployment/{name}", "-n", namespace, "--type=merge", "-p", json.dumps(patch), *_dry(dry_run)]
+        ).strip()
 
     def scale(self, namespace: str, name: str, replicas: int, dry_run: bool = False) -> str:
         return self.run(
